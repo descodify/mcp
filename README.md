@@ -13,8 +13,8 @@ client** — Claude Desktop, Claude Code, Gemini CLI, Cursor, Windsurf, VS Code
 (Copilot agent), Cline, Zed. Only *where* you put the config differs; the
 `{ command, args, env }` block is the same everywhere.
 
-> **Until the npm publish lands, use `github:descodify/mcp` in place of
-> `@descodify/mcp`** in any example below — it's identical and builds on install.
+> Prefer not to use npm? `github:descodify/mcp` works anywhere `@descodify/mcp`
+> does — it's the same code and builds on install.
 
 ## Setup
 
