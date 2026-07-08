@@ -104,7 +104,7 @@ duplicate certified invoice, and every write tool's description tells the model
 to confirm with you before issuing.
 
 For an agent that should follow Portuguese fiscal conventions end-to-end, pair
-this with the public **`descodify`** skill in [`skill/`](skill) of this repo
+this with the public **`descodify`** skill in [`skills/descodify/`](skills/descodify) of this repo
 (published to [skills.sh](https://skills.sh)) — it encodes the guardrails
 (confirm-before-issue, credit-note-not-edit, defer tax facts to Descodify).
 

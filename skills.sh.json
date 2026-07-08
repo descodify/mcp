@@ -1,0 +1,11 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Descodify",
+      "description": "Drive Descodify — free certified invoicing for Portuguese solo entrepreneurs — from your AI. Pairs with the @descodify/mcp server, or calls the public /api/v1 directly.",
+      "skills": ["descodify"]
+    }
+  ]
+}
