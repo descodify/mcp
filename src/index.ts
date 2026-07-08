@@ -9,7 +9,7 @@
  *
  * Configuration (env):
  *   DESCODIFY_API_KEY   required — a `dsc_live_…` key from Settings → Developers
- *   DESCODIFY_BASE_URL  optional — defaults to https://app.descodify.pt
+ *   DESCODIFY_BASE_URL  optional — defaults to https://descodify.pt
  *
  * All diagnostics go to stderr — stdout is reserved for the MCP protocol stream.
  */

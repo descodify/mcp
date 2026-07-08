@@ -1,6 +1,6 @@
 {
   "name": "@descodify/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Model Context Protocol server for Descodify — drive certified Portuguese invoicing, customers and products from your AI (Claude Desktop, Claude Code, Cursor, …).",
   "license": "MIT",
   "homepage": "https://descodify.pt/developers",
@@ -38,7 +38,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "smoke": "npm run build && node smoke.mjs && node live-smoke.mjs"
+    "smoke": "npm run build && node smoke.mjs && node live-smoke.mjs && node base-url-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

@@ -22,7 +22,7 @@ export class ApiError extends Error {
 
 export interface ClientOptions {
   apiKey: string;
-  /** Defaults to https://app.descodify.pt — override for a dev instance. */
+  /** Defaults to https://descodify.pt — override for a dev instance. */
   baseUrl?: string;
 }
 
@@ -38,7 +38,8 @@ interface RequestOptions {
   accept?: string;
 }
 
-const DEFAULT_BASE_URL = "https://app.descodify.pt";
+/** Canonical production origin. `descodify.pt` serves both the app and `/api/v1`. */
+export const DEFAULT_BASE_URL = "https://descodify.pt";
 
 export class DescodifyClient {
   private readonly apiKey: string;

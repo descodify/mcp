@@ -6,7 +6,7 @@ license: MIT
 
 # Driving Descodify — certified Portuguese invoicing
 
-[Descodify](https://app.descodify.pt) issues **legally certified** invoices for
+[Descodify](https://descodify.pt) issues **legally certified** invoices for
 Portuguese solo entrepreneurs (regime simplificado / recibos verdes): each issued
 invoice is signed, gets a permanent sequential number + ATCUD + QR code, and is
 communicated to the Tax Authority (AT). This skill tells you how to drive it
@@ -21,7 +21,7 @@ supports; the flow and rules below are identical for both:
 - **MCP** — if the `@descodify/mcp` server is configured, each operation below is
   one of its tools.
 - **Direct HTTP** — otherwise call the REST API at
-  `https://app.descodify.pt/api/v1` with `Authorization: Bearer dsc_live_…`. The
+  `https://descodify.pt/api/v1` with `Authorization: Bearer dsc_live_…`. The
   machine-readable contract — every endpoint, parameter, field, and error — is at
   **`GET /api/v1/openapi.json`** (public, no key). Treat it as the source of truth
   for all wire details; don't hardcode shapes from memory.

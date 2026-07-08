@@ -1,6 +1,6 @@
 # @descodify/mcp
 
-Model Context Protocol server for [Descodify](https://app.descodify.pt) — drive
+Model Context Protocol server for [Descodify](https://descodify.pt) — drive
 **certified Portuguese invoicing**, customers and products from your AI (Claude
 Desktop, Claude Code, Cursor, or any MCP client), by natural language.
 
@@ -75,7 +75,7 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) — same bl
 as Claude Desktop.
 </details>
 
-`DESCODIFY_BASE_URL` is optional (defaults to `https://app.descodify.pt`); set it
+`DESCODIFY_BASE_URL` is optional (defaults to `https://descodify.pt`); set it
 to point at a self-hosted or dev instance.
 
 ## Tools
