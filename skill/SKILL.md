@@ -97,4 +97,4 @@ Every error is `{ error: { type, message, details? } }`; surface `message`:
   and retry.
 - `429` — rate limited; wait for the `Retry-After` interval.
 
-Full reference: `GET /api/v1/openapi.json` and <https://app.descodify.pt/developers>.
+Full reference: `GET /api/v1/openapi.json` and <https://descodify.pt/developers>.

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Model Context Protocol server for Descodify — drive certified Portuguese invoicing, customers and products from your AI (Claude Desktop, Claude Code, Cursor, …).",
   "license": "MIT",
-  "homepage": "https://app.descodify.pt/developers",
+  "homepage": "https://descodify.pt/developers",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/descodify/mcp.git"
