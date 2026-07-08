@@ -8,27 +8,75 @@ It's a thin, open-source wrapper over Descodify's public `/api/v1`. The server
 runs locally over stdio; your org is resolved from the API key, so there is no
 extra hosting or OAuth — calls land on the same certified path as the app UI.
 
+MCP is an open, vendor-neutral protocol, so the **same server works in any MCP
+client** — Claude Desktop, Claude Code, Gemini CLI, Cursor, Windsurf, VS Code
+(Copilot agent), Cline, Zed. Only *where* you put the config differs; the
+`{ command, args, env }` block is the same everywhere.
+
+> **Until the npm publish lands, use `github:descodify/mcp` in place of
+> `@descodify/mcp`** in any example below — it's identical and builds on install.
+
 ## Setup
 
-1. In Descodify, go to **Settings → Developers** and create an API key
-   (`dsc_live_…`), granting the scopes you need (`customers`, `products`,
-   `invoices`, read and/or write). Copy the secret — it's shown once.
-2. Add the server to your MCP client config:
+**1. Create an API key.** In Descodify → **Settings → Developers**, create a key
+(`dsc_live_…`) with the scopes you need (`customers`, `products`, `invoices`,
+read and/or write). Copy the secret — it's shown once.
 
-   ```json
-   {
-     "mcpServers": {
-       "descodify": {
-         "command": "npx",
-         "args": ["-y", "@descodify/mcp"],
-         "env": { "DESCODIFY_API_KEY": "dsc_live_..." }
-       }
-     }
-   }
-   ```
+**2. Add the server to your client.**
 
-   `DESCODIFY_BASE_URL` is optional (defaults to `https://app.descodify.pt`); set
-   it to point at a self-hosted or dev instance.
+<details open>
+<summary><b>Claude Desktop</b></summary>
+
+Edit `claude_desktop_config.json` (Settings → Developer → Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "descodify": {
+      "command": "npx",
+      "args": ["-y", "@descodify/mcp"],
+      "env": { "DESCODIFY_API_KEY": "dsc_live_..." }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+```sh
+claude mcp add descodify --env DESCODIFY_API_KEY=dsc_live_... -- npx -y @descodify/mcp
+```
+</details>
+
+<details>
+<summary><b>Gemini CLI</b></summary>
+
+Add to `~/.gemini/settings.json` (same block as Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "descodify": {
+      "command": "npx",
+      "args": ["-y", "@descodify/mcp"],
+      "env": { "DESCODIFY_API_KEY": "dsc_live_..." }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>Cursor</b></summary>
+
+Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) — same block
+as Claude Desktop.
+</details>
+
+`DESCODIFY_BASE_URL` is optional (defaults to `https://app.descodify.pt`); set it
+to point at a self-hosted or dev instance.
 
 ## Tools
 
