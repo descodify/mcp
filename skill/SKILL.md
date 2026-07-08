@@ -1,6 +1,6 @@
 ---
 name: descodify
-description: Issue certified Portuguese invoices and manage customers/products via Descodify's API or MCP server. Use when the user wants to create, issue, cancel, or look up a fatura / recibo / invoice in Portugal, manage recibos-verdes clients, or drive Descodify by natural language. Triggers on certified invoice, fatura, fatura-recibo, recibo verde, ATCUD, IVA invoice, "issue an invoice in Portugal", Descodify.
+description: Issue certified Portuguese invoices and manage customers/products with Descodify — via its MCP server or its REST API directly. Use when the user wants to create, issue, cancel, or look up a fatura / recibo / invoice in Portugal, manage recibos-verdes clients, or drive Descodify by natural language. Triggers on certified invoice, fatura, fatura-recibo, recibo verde, ATCUD, IVA invoice, "issue an invoice in Portugal", Descodify.
 license: MIT
 ---
 
@@ -13,56 +13,67 @@ communicated to the Tax Authority (AT). This skill tells you how to drive it
 safely. The tax computation is Descodify's job — your job is to gather the right
 inputs, confirm with the user, and never issue without approval.
 
-## How to connect
+## Two equivalent ways to reach it
 
-Prefer the **`@descodify/mcp`** server (tools like `create_invoice`,
-`issue_invoice`, `list_customers`). If it isn't configured, call the REST API
-directly at `https://app.descodify.pt/api/v1` with
-`Authorization: Bearer dsc_live_…`; the OpenAPI document is at
-`GET /api/v1/openapi.json`.
+Descodify exposes the **same operations** two ways — use whichever your client
+supports; the flow and rules below are identical for both:
+
+- **MCP** — if the `@descodify/mcp` server is configured, each operation below is
+  one of its tools.
+- **Direct HTTP** — otherwise call the REST API at
+  `https://app.descodify.pt/api/v1` with `Authorization: Bearer dsc_live_…`. The
+  machine-readable contract — every endpoint, parameter, field, and error — is at
+  **`GET /api/v1/openapi.json`** (public, no key). Treat it as the source of truth
+  for all wire details; don't hardcode shapes from memory.
 
 Either way the user needs an **org-scoped API key** created in Descodify →
-**Settings → Developers** (choose the `customers` / `products` / `invoices`
-scopes, read and/or write). If no key is configured, tell the user how to create
-one and **stop** — do not attempt any write.
+**Settings → Developers** (with the `customers` / `products` / `invoices` scopes,
+read and/or write). If no key is configured, tell the user how to create one and
+**stop** — do not attempt any write.
 
-Conventions: money is integer **cents**, VAT rates integer **percent**, field
-names are **camelCase** (`customerType`, `unitPrice`, `vatTier`). Lists are
-cursor-paginated (`{ data, next_cursor }`).
+Conventions (both paths, per `openapi.json`): money is integer **cents**, VAT
+rates integer **percent**, field names **camelCase**, lists cursor-paginated
+(`{ data, next_cursor }`).
+
+## Operations available
+
+- **Business profile** — read the issuer's identity + VAT regime.
+- **Customers** — search/list, get, create (optionally verifying an EU VAT number
+  against VIES), update, delete.
+- **Products** — list, get, create, update, delete.
+- **Invoices** — list, get, create as a draft, issue, cancel, fetch the certified
+  PDF, and create a credit/debit note referencing an original invoice.
 
 ## The safe flow
 
-1. **Read the business profile first** (`get_business_profile`). It tells you the
-   issuer's identity and VAT regime — the correct invoice type and VAT treatment
-   depend on it. Don't guess the regime.
-2. **Resolve the customer.** Search with `list_customers` (`q=`); create one with
-   `create_customer` only if it doesn't exist. For an EU-VAT business customer,
-   pass `verifyVat: true` to validate against VIES.
-3. **Create a DRAFT** with `create_invoice` (omit `action`). Build the line items
-   from what the user gave you; reference an existing product via `productId`
-   where possible.
+1. **Read the business profile first.** It tells you the issuer's identity and VAT
+   regime — the correct invoice type and VAT treatment depend on it. Don't guess
+   the regime.
+2. **Find or create the customer.** Search existing customers first; create one
+   only if it doesn't exist. For an EU-VAT business customer, verify the VAT
+   number against VIES as part of creation.
+3. **Create the invoice as a draft.** Build the line items from what the user
+   gave you; reference an existing product where possible.
 4. **Confirm line items and totals with the user in plain language** — amounts,
    VAT, customer, invoice type. This is the review gate.
-5. **Only after explicit approval, issue** with `issue_invoice` (or re-create
-   with `action:"issue"`). This is irreversible.
+5. **Only after explicit approval, issue the draft.** This is irreversible.
 
 ## Non-negotiable fiscal rules
 
-- **Issuing is irreversible.** An issued invoice has a permanent sequential
-  number and cannot be edited or deleted. Never call `issue_invoice` (or
-  `create_invoice` with `action:"issue"`) without the user's explicit go-ahead on
-  the exact contents.
+- **Issuing is irreversible.** An issued invoice has a permanent sequential number
+  and cannot be edited or deleted. Never issue (including any "create and issue in
+  one step" shortcut) without the user's explicit go-ahead on the exact contents.
 - **Correct an issued invoice with a credit note, never a mutation.** To fix or
-  reverse an issued invoice, create a `credit_note` (`create_invoice` with
-  `invoiceType:"credit_note"` and `originalInvoiceId`) and issue it. Do not try
-  to PATCH or DELETE an issued invoice — only drafts are mutable.
-- **Cancel needs a reason**, and cancelling is for drafts / not-yet-acted
-  invoices; a delivered issued invoice is corrected via credit note.
+  reverse an issued invoice, create a credit note referencing the original invoice
+  and issue it. Editing or deleting only works on drafts.
+- **Cancelling needs a reason** and applies to drafts / not-yet-delivered
+  invoices; a delivered issued invoice is corrected via a credit note.
 - **The tax ID freezes** once a customer is used on a non-draft invoice — you
   can't change their NIF/VAT number afterward.
-- **Idempotency on issue is automatic** via the MCP server. If you call the REST
-  API directly, send a fresh `Idempotency-Key: <uuid>` on every issue so a retry
-  can't mint a second certified invoice.
+- **Idempotency on issue.** Over MCP the server attaches an idempotency key
+  automatically. On the direct HTTP path, send a fresh `Idempotency-Key: <uuid>`
+  on every issue (and on any create-and-issue call) so a network retry can't mint
+  a second certified invoice.
 
 ## Don't invent tax facts
 
@@ -72,7 +83,7 @@ Descodify computes the correct VAT and totals from the issuer's regime; take the
 numbers it returns, and for fiscal questions point the user to the product rather
 than asserting a rate yourself.
 
-## Errors you'll see
+## Errors
 
 Every error is `{ error: { type, message, details? } }`; surface `message`:
 
@@ -86,4 +97,4 @@ Every error is `{ error: { type, message, details? } }`; surface `message`:
   and retry.
 - `429` — rate limited; wait for the `Retry-After` interval.
 
-Full API reference: <https://app.descodify.pt/developers>.
+Full reference: `GET /api/v1/openapi.json` and <https://app.descodify.pt/developers>.
