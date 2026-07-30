@@ -14,10 +14,22 @@
  * All diagnostics go to stderr — stdout is reserved for the MCP protocol stream.
  */
 
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ApiError, DescodifyClient } from "./client.js";
 import { registerTools } from "./tools.js";
+
+/**
+ * Read the version off package.json rather than repeating it as a literal —
+ * a second copy drifts on the very next release (it shipped 0.1.1 still
+ * advertising 0.1.0 over MCP). `createRequire` resolves at runtime against
+ * this module's own URL, so `../package.json` is the package root from both
+ * `dist/index.js` and `src/index.ts`; npm includes package.json in every
+ * tarball regardless of the `files` allowlist. A JSON import is not an option
+ * here: package.json sits outside tsconfig's `rootDir`.
+ */
+const { version: VERSION } = createRequire(import.meta.url)("../package.json") as { version: string };
 
 async function main(): Promise<void> {
   const apiKey = process.env.DESCODIFY_API_KEY;
@@ -46,7 +58,7 @@ async function main(): Promise<void> {
     console.error(`Descodify MCP: startup profile check failed (${(err as Error).message}); continuing.`);
   }
 
-  const server = new McpServer({ name: "descodify", version: "0.1.0" });
+  const server = new McpServer({ name: "descodify", version: VERSION });
   registerTools(server, client);
 
   const transport = new StdioServerTransport();
