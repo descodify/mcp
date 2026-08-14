@@ -115,4 +115,27 @@ bun install       # or npm install
 bun run build     # tsc → dist/
 ```
 
+### Tests
+
+```sh
+npm run smoke     # offline: handshake, tool registration, HTTP wire contract
+npm run eval      # golden questions: does a real model pick the right tool?
+```
+
+`smoke` needs nothing external — it runs the built server against an unreachable
+host and a local mock of `/api/v1`, so it never touches live data.
+
+`eval` is the behavioural test: it boots the server against the same kind of
+mock, pulls the real shipped tool schemas over MCP, and asks Claude a set of
+questions a user would actually type, asserting which tools do and do not get
+called. It covers routing (does "show me my customers" reach `list_customers`?)
+and the safety contract the tool descriptions promise — most importantly that
+drafting an invoice never issues one, since issuing is irreversible.
+
+It needs `ANTHROPIC_API_KEY` and costs a few cents per run; without a key it
+skips loudly rather than failing. `EVAL_MODEL` overrides the model and
+`EVAL_REPEATS` runs several rounds, which is worth doing after editing a tool
+description — routing is model behaviour, so a single green run is weaker
+evidence than a deterministic test.
+
 MIT-licensed. Source: <https://github.com/descodify/mcp>.
