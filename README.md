@@ -108,6 +108,25 @@ this with the public **`descodify`** skill in [`skills/descodify/`](skills/desco
 (published to [skills.sh](https://skills.sh)) — it encodes the guardrails
 (confirm-before-issue, credit-note-not-edit, defer tax facts to Descodify).
 
+## Issuing requires confirmation
+
+Issuing is the only irreversible act in this surface: it mints a legally
+certified invoice with a permanent sequential number that cannot be edited or
+deleted, only corrected with a credit note. The server enforces confirmation
+rather than trusting the model to ask.
+
+`issue_invoice`, and `create_invoice` with `action:"issue"`, take two calls:
+
+1. The first call issues nothing. It returns the exact invoice about to be
+   minted — customer, line items, total — plus a one-shot `confirmationToken`.
+2. After the user approves, the same tool is called again with that token.
+
+A wrong token is refused, a spent token is refused, and neither reaches the API.
+If your MCP client supports elicitation, the server asks you directly instead
+and issues only on an explicit accept.
+
+This costs one extra confirmation on a legally binding document, deliberately.
+
 ## Development
 
 ```sh
@@ -137,5 +156,14 @@ skips loudly rather than failing. `EVAL_MODEL` overrides the model and
 `EVAL_REPEATS` runs several rounds, which is worth doing after editing a tool
 description — routing is model behaviour, so a single green run is weaker
 evidence than a deterministic test.
+
+**Run it against a small model.** Measured, not assumed: with the safety wording
+stripped out of `issue_invoice`, `claude-opus-4-7` still refused to issue
+without confirmation, while `claude-haiku-4-5` created *and issued* a certified
+invoice off "Bill Acme 800 euros". A strong model's own caution masks a bad
+description, so an eval run only against the strongest model will pass no matter
+what the descriptions say. `EVAL_MODEL=claude-haiku-4-5` is the sensitive
+setting and the one that tells you whether the descriptions are carrying their
+weight.
 
 MIT-licensed. Source: <https://github.com/descodify/mcp>.

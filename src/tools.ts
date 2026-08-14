@@ -103,6 +103,112 @@ function invoiceBody(args: Record<string, unknown>) {
   return body;
 }
 
+// ── Issuing confirmation gate ───────────────────────────────────────────────
+// Issuing is the one irreversible act in this surface: it mints a legally
+// certified invoice with a permanent sequential number. A description asking
+// the model to "confirm with the user first" is honoured by strong models and
+// ignored by weaker ones — measured, not assumed: with that wording removed,
+// claude-haiku-4-5 issued an invoice off "Bill Acme 800 euros" with no
+// confirmation at all (golden-eval.mjs, case `prepare-not-issue`). So the
+// server enforces confirmation structurally instead of trusting the prose.
+//
+// Two paths, because MCP clients differ:
+//   1. The client supports elicitation -> ask the HUMAN directly and issue only
+//      on an explicit accept. This is a real human gate.
+//   2. It does not -> hand back a one-shot token with the full invoice summary
+//      and refuse until that exact token comes back. This cannot reach the
+//      human by itself, but it makes a single-shot silent issue impossible and
+//      forces the totals into the transcript where the human can see them.
+//
+// Note for the 2026-07-28 migration: elicitation's server-initiated request is
+// replaced by the Multi Round-Trip Requests pattern. Path 1 moves to MRTR when
+// the SDK ships support; path 2 is unaffected.
+const ISSUE_CONFIRM_TTL_MS = 10 * 60 * 1000;
+const pendingIssue = new Map<string, { token: string; expiresAt: number }>();
+
+function formatCents(v: unknown): string {
+  return typeof v === "number" ? `${(v / 100).toFixed(2)} EUR` : "unknown";
+}
+
+/** The facts a human must check before an irreversible mint. */
+function summariseInvoice(inv: Record<string, unknown>): string {
+  const items = Array.isArray(inv.items) ? inv.items : [];
+  const lines = items.map((raw) => {
+    const it = raw as Record<string, unknown>;
+    return `    - ${String(it.description ?? "item")} x ${String(it.quantity ?? "?")} @ ${formatCents(it.unitPrice)}`;
+  });
+  return [
+    `  Invoice:  ${String(inv.invoiceNumber ?? inv.id ?? "(not yet created)")}`,
+    `  Type:     ${String(inv.invoiceType ?? "invoice")}`,
+    `  Customer: ${String(inv.customerId ?? "-")}`,
+    `  Total:    ${formatCents(inv.amountCents)}`,
+    lines.length ? `  Lines:\n${lines.join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+type Gate = { ok: true } | { ok: false; message: string };
+
+async function gateIssuing(
+  server: McpServer,
+  key: string,
+  summary: string,
+  confirmationToken: string | undefined,
+): Promise<Gate> {
+  if (server.server.getClientCapabilities()?.elicitation) {
+    const res = await server.server.elicitInput({
+      message:
+        "IRREVERSIBLE — issuing mints a legally certified invoice with a permanent sequential number. " +
+        "It cannot be edited or deleted afterwards, only corrected with a credit note.\n\n" +
+        `${summary}\n\nConfirm to issue.`,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          confirm: {
+            type: "boolean",
+            title: "Issue this invoice",
+            description: "Confirm the customer, line items and total above are correct.",
+          },
+        },
+        required: ["confirm"],
+      },
+    });
+    if (res.action !== "accept" || res.content?.confirm !== true) {
+      return { ok: false, message: `Issuing cancelled by the user (${res.action}). The invoice was NOT issued.` };
+    }
+    return { ok: true };
+  }
+
+  const now = Date.now();
+  const pending = pendingIssue.get(key);
+  if (confirmationToken && pending && pending.token === confirmationToken && pending.expiresAt > now) {
+    pendingIssue.delete(key); // one-shot: a retry needs a fresh confirmation
+    return { ok: true };
+  }
+
+  // Reuse a live pending confirmation rather than minting a new token. A wrong
+  // or mistyped token must not rotate the one the user has already been shown,
+  // or their approval becomes unusable and the correct retry fails forever.
+  const live = pending && pending.expiresAt > now ? pending : undefined;
+  const token = live?.token ?? randomUUID();
+  pendingIssue.set(key, { token, expiresAt: live?.expiresAt ?? now + ISSUE_CONFIRM_TTL_MS });
+  return {
+    ok: false,
+    message:
+      "CONFIRMATION REQUIRED — nothing has been issued yet.\n\n" +
+      "Issuing mints a legally certified invoice with a permanent sequential number that cannot be " +
+      "edited or deleted, only corrected with a credit note.\n\n" +
+      `${summary}\n\n` +
+      "Show these details to the user and get their explicit approval. Only once they have approved, " +
+      `call this tool again with confirmationToken: "${token}". Do not call it again without their answer.`,
+  };
+}
+
+function gateBlocked(message: string) {
+  return { isError: true, content: [{ type: "text" as const, text: message }] };
+}
+
 export function registerTools(server: McpServer, client: DescodifyClient): void {
   // ── Business profile ──────────────────────────────────────────────────────
   server.registerTool(
@@ -110,7 +216,11 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
     {
       title: "Get business profile",
       description:
-        "Read the issuer's identity and VAT regime (name, NIF, regime, series). Call this FIRST before constructing invoices — the correct invoice type and VAT treatment depend on the issuer's regime.",
+        "Read the issuer's identity and VAT regime (name, NIF, regime, series). " +
+        "REQUIRED before create_invoice or issue_invoice: the issuer's regime determines the correct invoice type " +
+        "and VAT treatment, and an invoice built without it can be fiscally wrong. " +
+        "Call this first in any conversation that will create or issue an invoice — do not infer the regime, do not " +
+        "reuse an assumption from earlier, and do not skip it because the request looks simple.",
       inputSchema: {},
     },
     () => run(() => client.request("/business-profile")),
@@ -216,17 +326,39 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
       description:
         "Create a DRAFT invoice. Prefer this, then confirm line items and totals with the user, then call issue_invoice. " +
         'Pass action:"issue" to create-and-issue in one step ONLY after the user has explicitly approved issuing — that mints a legally certified, irreversible invoice.',
-      inputSchema: { ...invoiceFields, action: z.enum(["issue"]).optional() },
+      inputSchema: {
+        ...invoiceFields,
+        action: z.enum(["issue"]).optional(),
+        confirmationToken: z
+          .string()
+          .optional()
+          .describe("Only for action:\"issue\" — the token returned by a prior confirmation-required response."),
+      },
     },
-    (args) =>
-      run(() =>
+    async (args) => {
+      const { confirmationToken, ...rest } = args;
+      const body = invoiceBody(rest);
+      if (rest.action === "issue") {
+        // Create-and-issue is the same irreversible act as issue_invoice, so it
+        // goes through the same gate — summarised from the request, since the
+        // invoice does not exist yet.
+        const gate = await gateIssuing(
+          server,
+          `create:${JSON.stringify(body)}`,
+          summariseInvoice({ ...body, amountCents: undefined }),
+          confirmationToken,
+        );
+        if (!gate.ok) return gateBlocked(gate.message);
+      }
+      return run(() =>
         client.request("/invoices", {
           method: "POST",
-          body: args.action === "issue" ? { ...invoiceBody(args), action: "issue" } : invoiceBody(args),
+          body: rest.action === "issue" ? { ...body, action: "issue" } : body,
           // Idempotency is required when issuing so a retry can't mint a second certified invoice.
-          idempotencyKey: args.action === "issue" ? randomUUID() : undefined,
+          idempotencyKey: rest.action === "issue" ? randomUUID() : undefined,
         }),
-      ),
+      );
+    },
   );
   server.registerTool(
     "issue_invoice",
@@ -235,11 +367,31 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
       description:
         "Issue a draft invoice through the certified path (series, digital signature, ATCUD/QR, AT communication). " +
         "This produces a legally certified invoice with a permanent sequential number that CANNOT be edited or deleted — only corrected via a credit note. " +
-        "NEVER call this without the user's explicit confirmation of the line items and totals.",
-      inputSchema: { id: z.string() },
+        "NEVER call this without the user's explicit confirmation of the line items and totals. " +
+        "The server enforces this: the first call returns the invoice summary and a confirmationToken and issues " +
+        "nothing. Show that summary to the user, and only after they approve, call again with the token.",
+      inputSchema: {
+        id: z.string(),
+        confirmationToken: z
+          .string()
+          .optional()
+          .describe("The token returned by a prior confirmation-required response for this same invoice."),
+      },
     },
-    ({ id }) =>
-      run(() => client.request(`/invoices/${id}/issue`, { method: "POST", idempotencyKey: randomUUID() })),
+    async ({ id, confirmationToken }) => {
+      // Read the invoice first so the confirmation shows what will actually be
+      // minted, rather than trusting the model's paraphrase of it.
+      let summary = `  Invoice: ${id}`;
+      try {
+        const inv = (await client.request(`/invoices/${id}`)) as Record<string, unknown>;
+        summary = summariseInvoice(inv);
+      } catch {
+        // A read failure must not open the gate; confirm against the id alone.
+      }
+      const gate = await gateIssuing(server, `issue:${id}`, summary, confirmationToken);
+      if (!gate.ok) return gateBlocked(gate.message);
+      return run(() => client.request(`/invoices/${id}/issue`, { method: "POST", idempotencyKey: randomUUID() }));
+    },
   );
   server.registerTool(
     "cancel_invoice",
