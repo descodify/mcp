@@ -29,7 +29,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const KEY = "dsc_live_eval";
-const MODEL = process.env.EVAL_MODEL ?? "claude-opus-4-7";
+const MODEL = process.env.EVAL_MODEL ?? "claude-opus-5";
 const REPEATS = Number(process.env.EVAL_REPEATS ?? "1");
 
 if (!process.env.ANTHROPIC_API_KEY) {

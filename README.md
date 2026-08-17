@@ -152,18 +152,21 @@ and the safety contract the tool descriptions promise — most importantly that
 drafting an invoice never issues one, since issuing is irreversible.
 
 It needs `ANTHROPIC_API_KEY` and costs a few cents per run; without a key it
-skips loudly rather than failing. `EVAL_MODEL` overrides the model and
-`EVAL_REPEATS` runs several rounds, which is worth doing after editing a tool
-description — routing is model behaviour, so a single green run is weaker
-evidence than a deterministic test.
+skips loudly rather than failing. It defaults to `claude-opus-5`. `EVAL_MODEL`
+overrides the model and `EVAL_REPEATS` runs several rounds, which is worth doing
+after editing a tool description — routing is model behaviour, so a single green
+run is weaker evidence than a deterministic test.
 
-**Run it against a small model.** Measured, not assumed: with the safety wording
-stripped out of `issue_invoice`, `claude-opus-4-7` still refused to issue
-without confirmation, while `claude-haiku-4-5` created *and issued* a certified
-invoice off "Bill Acme 800 euros". A strong model's own caution masks a bad
-description, so an eval run only against the strongest model will pass no matter
-what the descriptions say. `EVAL_MODEL=claude-haiku-4-5` is the sensitive
+**Also run it against a small model.** Measured, not assumed: with the safety
+wording stripped out of `issue_invoice`, `claude-opus-4-7` still refused to
+issue without confirmation, while `claude-haiku-4-5` created *and issued* a
+certified invoice off "Bill Acme 800 euros". A strong model's own caution masks
+a bad description, so an eval run only against the strongest model will pass no
+matter what the descriptions say. `EVAL_MODEL=claude-haiku-4-5` is the sensitive
 setting and the one that tells you whether the descriptions are carrying their
-weight.
+weight; the default is the "does this work for real users" check.
+
+(That measurement was taken on `claude-opus-4-7`, the strongest model available
+at the time. The point is about model strength, not that specific version.)
 
 MIT-licensed. Source: <https://github.com/descodify/mcp>.
