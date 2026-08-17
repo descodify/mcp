@@ -169,4 +169,13 @@ weight; the default is the "does this work for real users" check.
 (That measurement was taken on `claude-opus-4-7`, the strongest model available
 at the time. The point is about model strength, not that specific version.)
 
+**A prose instruction is a probability, not a guarantee.** `get_business_profile`
+tells the model it is REQUIRED before invoicing. Measured over five runs on
+`claude-opus-5`, it is honoured four times out of five — the outlier went
+straight to `create_invoice`, choosing VAT treatment without reading the
+issuer's regime. That is why issuing is gated in the server rather than
+described in prose: anything that must always happen has to be enforced, not
+requested. If profile-first ever needs to be a hard guarantee, it needs the same
+treatment.
+
 MIT-licensed. Source: <https://github.com/descodify/mcp>.
