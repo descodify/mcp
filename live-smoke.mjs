@@ -82,13 +82,50 @@ const list = await client.callTool({ name: "list_customers", arguments: { q: "ac
 assert(!list.isError && textOf(list).includes("acme"), `list_customers: ${textOf(list)}`);
 console.log("OK list_customers → query serialized, page returned");
 
-// 3) Create-and-issue — body carries action:issue + a generated Idempotency-Key.
-const issued = await client.callTool({
+// 3) The issuing gate. Deterministic and model-independent: issuing is the one
+//    irreversible act here, so the server must refuse it until confirmed rather
+//    than relying on a tool description the model may ignore.
+const issueArgs = {
+  invoiceType: "invoice",
+  action: "issue",
+  items: [{ description: "x", quantity: 1, unitPrice: 1000, vatRate: 23, itemType: "services" }],
+};
+
+// 3a) Unconfirmed — must be refused, and must not reach the API at all.
+const unconfirmed = await client.callTool({ name: "create_invoice", arguments: issueArgs });
+assert(unconfirmed.isError, `unconfirmed issue should be refused: ${textOf(unconfirmed)}`);
+assert(/CONFIRMATION REQUIRED/.test(textOf(unconfirmed)), `expected a confirmation prompt: ${textOf(unconfirmed)}`);
+assert(
+  !seen.some((s) => s.method === "POST" && s.path === "/api/v1/invoices"),
+  "unconfirmed issue reached the API — a certified invoice could have been minted",
+);
+console.log("OK create_invoice action:issue unconfirmed → refused, nothing sent to the API");
+
+const token = textOf(unconfirmed).match(/confirmationToken: "([^"]+)"/)?.[1];
+assert(token, `no confirmationToken handed back: ${textOf(unconfirmed)}`);
+
+// 3b) Wrong token — still refused. Guards against accepting any non-empty string.
+const wrongToken = await client.callTool({
   name: "create_invoice",
-  arguments: { invoiceType: "invoice", action: "issue", items: [{ description: "x", quantity: 1, unitPrice: 1000, vatRate: 23, itemType: "services" }] },
+  arguments: { ...issueArgs, confirmationToken: "not-the-token" },
 });
-assert(!issued.isError && textOf(issued).includes("FT 2026/1"), `create_invoice issue: ${textOf(issued)}`);
-console.log("OK create_invoice action:issue → certified invoice, idempotency sent");
+assert(wrongToken.isError, `a wrong confirmationToken must not issue: ${textOf(wrongToken)}`);
+assert(
+  !seen.some((s) => s.method === "POST" && s.path === "/api/v1/invoices"),
+  "a wrong confirmationToken reached the API",
+);
+console.log("OK create_invoice action:issue wrong token → still refused");
+
+// 3c) Correct token — issues, with action:issue and a generated Idempotency-Key.
+//     Note the token from 3a still applies: 3b was refused, so it was not spent.
+const issued = await client.callTool({ name: "create_invoice", arguments: { ...issueArgs, confirmationToken: token } });
+assert(!issued.isError && textOf(issued).includes("FT 2026/1"), `confirmed issue: ${textOf(issued)}`);
+console.log("OK create_invoice action:issue confirmed → certified invoice, idempotency sent");
+
+// 3d) One-shot — replaying the same token must not mint a second invoice.
+const replay = await client.callTool({ name: "create_invoice", arguments: { ...issueArgs, confirmationToken: token } });
+assert(replay.isError, `a spent confirmationToken must not issue again: ${textOf(replay)}`);
+console.log("OK spent token → refused, cannot mint twice");
 
 // 4) Error envelope — 403 surfaced verbatim as a tool error.
 const err = await client.callTool({ name: "get_customer", arguments: { id: "nope" } });
