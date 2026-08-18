@@ -31,9 +31,19 @@ Either way the user needs an **org-scoped API key** created in Descodify →
 read and/or write). If no key is configured, tell the user how to create one and
 **stop** — do not attempt any write.
 
-Conventions (both paths, per `openapi.json`): money is integer **cents**, VAT
-rates integer **percent**, field names **camelCase**, lists cursor-paginated
+Conventions (per `openapi.json`, always the authority): VAT rates integer
+**percent**, field names **camelCase**, lists cursor-paginated
 (`{ data, next_cursor }`).
+
+**Money differs by path, and getting it wrong is a four-orders-of-magnitude
+error on a legal document:**
+
+- Over the **MCP tools**, every price is a decimal euro **string** — `"80.00"`,
+  `"1.789"`. Never cents, never micro-euros; the server converts.
+- Calling **`/api/v1` directly**, invoice line prices are integer
+  **micro-euros** (`unitPriceMicros`, 1 EUR = 1000000) because SAF-T needs 4-6
+  decimals once a line discount is apportioned, while product prices are
+  integer **cents** (`unitPrice`). Check `openapi.json` rather than assuming.
 
 ## Operations available
 
@@ -57,6 +67,14 @@ rates integer **percent**, field names **camelCase**, lists cursor-paginated
 4. **Confirm line items and totals with the user in plain language** — amounts,
    VAT, customer, invoice type. This is the review gate.
 5. **Only after explicit approval, issue the draft.** This is irreversible.
+
+Issuing over MCP takes **two calls**, and this is by design — do not treat the
+first one as a failure. `issue_invoice` (and `create_invoice` with
+`action:"issue"`) returns `CONFIRMATION REQUIRED` with the exact invoice about
+to be minted and a one-shot `confirmationToken`, and issues nothing. Show those
+details to the user verbatim, and only once they approve, call again with the
+token. A wrong or already-spent token is refused. If the client supports
+elicitation the server asks the user directly instead.
 
 ## Non-negotiable fiscal rules
 
