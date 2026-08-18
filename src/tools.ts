@@ -1,8 +1,10 @@
 /**
  * Registers the Descodify MCP tool surface. Every tool is a thin wrapper over
  * an `/api/v1` endpoint (see ../README.md for the mapping). Field names are the
- * camelCase the API actually ships (per its OpenAPI 3.1 document), money is
- * integer cents, VAT rates integer percent.
+ * camelCase the API actually ships (per its OpenAPI 3.1 document) and VAT rates
+ * are integer percent. Money crossing the TOOL surface is a decimal euro string
+ * ("80.00"); the wrapper converts to whatever unit each endpoint takes — cents
+ * for products, micro-euros for invoice lines. See money.ts for why.
  *
  * Fiscal safety: `issue_invoice` (and `create_invoice` with `action:"issue"`)
  * mint a legally certified, AT-communicated invoice with a permanent sequential
@@ -16,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ApiError, type DescodifyClient } from "./client.js";
+import { eurosToCents, eurosToMicros } from "./money.js";
 
 const PAGINATION = {
   cursor: z.string().optional().describe("Opaque next-page token from a previous list call's next_cursor."),
@@ -44,7 +47,11 @@ const customerFields = {
 const productFields = {
   name: z.string(),
   description: z.string().nullish(),
-  unitPrice: z.number().int().min(0).describe("Unit price in cents."),
+  unitPrice: z
+    .string()
+    .describe(
+      'Unit price net of tax, in EUROS, as a decimal string — "80.00", "1.789". Never cents, never micro-euros: the wrapper converts.',
+    ),
   unit: z.string().describe('e.g. "unit", "hour", "kg".'),
   vatTier: z.enum(["normal", "intermediate", "reduced", "exempt"]),
   itemType: z.enum(["goods", "services"]),
@@ -54,7 +61,11 @@ const invoiceItem = z.object({
   productId: z.string().nullish().describe("Optional — reference an existing product."),
   description: z.string(),
   quantity: z.number().int().min(1),
-  unitPrice: z.number().int().min(0).describe("Cents."),
+  unitPrice: z
+    .string()
+    .describe(
+      'Unit price net of tax, in EUROS, as a decimal string — "80.00", "1.789". Never cents, never micro-euros: the wrapper converts.',
+    ),
   vatRate: z.number().int().min(0).describe("VAT rate as a percent (23 = 23%)."),
   vatExemptionCode: z.string().nullish().describe("Required when vatRate is 0."),
   itemType: z.enum(["goods", "services"]),
@@ -97,9 +108,22 @@ async function run(fn: () => Promise<unknown>) {
   }
 }
 
-/** Splits the `action` flag off an invoice body so it is only sent when issuing. */
+/** Products take `unitPrice` in CENTS. */
+function productBody(body: Record<string, unknown>) {
+  const { unitPrice, ...rest } = body;
+  return { ...rest, unitPrice: eurosToCents(String(unitPrice)) };
+}
+
+/** Splits the `action` flag off an invoice body so it is only sent when issuing,
+ *  and converts each line to `unitPriceMicros`, which is what /api/v1 requires. */
 function invoiceBody(args: Record<string, unknown>) {
   const { action: _action, ...body } = args;
+  if (Array.isArray(body.items)) {
+    body.items = body.items.map((raw, i) => {
+      const { unitPrice, ...item } = raw as Record<string, unknown>;
+      return { ...item, unitPriceMicros: eurosToMicros(String(unitPrice), `items[${i}].unitPrice`) };
+    });
+  }
   return body;
 }
 
@@ -130,12 +154,22 @@ function formatCents(v: unknown): string {
   return typeof v === "number" ? `${(v / 100).toFixed(2)} EUR` : "unknown";
 }
 
+/** Unit prices are micro-euros end to end. Trailing zeros are trimmed so a
+ *  plain price reads "80.00" rather than "80.000000", but a discount-apportioned
+ *  one still shows its real precision ("0.5016") — the human is confirming an
+ *  irreversible document and must see what is actually on it. */
+function formatMicros(v: unknown): string {
+  if (typeof v !== "number") return "unknown";
+  const s = (v / 1_000_000).toFixed(6).replace(/(\.\d\d)(\d*?)0+$/, "$1$2");
+  return `${s} EUR`;
+}
+
 /** The facts a human must check before an irreversible mint. */
 function summariseInvoice(inv: Record<string, unknown>): string {
   const items = Array.isArray(inv.items) ? inv.items : [];
   const lines = items.map((raw) => {
     const it = raw as Record<string, unknown>;
-    return `    - ${String(it.description ?? "item")} x ${String(it.quantity ?? "?")} @ ${formatCents(it.unitPrice)}`;
+    return `    - ${String(it.description ?? "item")} x ${String(it.quantity ?? "?")} @ ${formatMicros(it.unitPriceMicros)}`;
   });
   return [
     `  Invoice:  ${String(inv.invoiceNumber ?? inv.id ?? "(not yet created)")}`,
@@ -278,7 +312,7 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
   server.registerTool(
     "create_product",
     { title: "Create product", description: "Create a product/service catalogue entry.", inputSchema: productFields },
-    (body) => run(() => client.request("/products", { method: "POST", body })),
+    (body) => run(() => client.request("/products", { method: "POST", body: productBody(body) })),
   );
   server.registerTool(
     "update_product",
@@ -287,7 +321,7 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
       description: "Update a product (full representation replace).",
       inputSchema: { id: z.string(), ...productFields },
     },
-    ({ id, ...body }) => run(() => client.request(`/products/${id}`, { method: "PATCH", body })),
+    ({ id, ...body }) => run(() => client.request(`/products/${id}`, { method: "PATCH", body: productBody(body) })),
   );
   server.registerTool(
     "delete_product",
@@ -337,7 +371,12 @@ export function registerTools(server: McpServer, client: DescodifyClient): void 
     },
     async (args) => {
       const { confirmationToken, ...rest } = args;
-      const body = invoiceBody(rest);
+      let body: Record<string, unknown>;
+      try {
+        body = invoiceBody(rest);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error).message }] };
+      }
       if (rest.action === "issue") {
         // Create-and-issue is the same irreversible act as issue_invoice, so it
         // goes through the same gate — summarised from the request, since the

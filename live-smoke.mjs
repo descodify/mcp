@@ -23,7 +23,9 @@ const server = http.createServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     const url = new URL(req.url, "http://localhost");
-    seen.push({ method: req.method, path: url.pathname, auth: req.headers.authorization, idem: req.headers["idempotency-key"] });
+    let bodyJson = null;
+    try { bodyJson = body ? JSON.parse(body) : null; } catch { /* non-JSON bodies are asserted elsewhere */ }
+    seen.push({ method: req.method, path: url.pathname, auth: req.headers.authorization, idem: req.headers["idempotency-key"], bodyJson });
     const json = (status, obj) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(obj));
@@ -40,10 +42,26 @@ const server = http.createServer((req, res) => {
       return json(200, { data: [{ id: "c1", name: url.searchParams.get("q") ?? "all" }], next_cursor: null });
     }
     if (url.pathname === "/api/v1/invoices" && req.method === "POST") {
-      const parsed = JSON.parse(body);
-      if (parsed.action !== "issue") fail ??= "expected action:issue in body";
-      if (!req.headers["idempotency-key"]) fail ??= "issue POST missing Idempotency-Key header";
-      return json(201, { id: "inv1", status: "issued", invoiceNumber: "FT 2026/1", atcud: "ABC-1" });
+      const parsed = bodyJson ?? {};
+      // /api/v1 requires unitPriceMicros. The tool surface takes decimal euros,
+      // so the wrapper must convert — a regression here is a 10_000x error on a
+      // signed document, which is why it is asserted on the wire, not in a unit test.
+      const line = parsed.items?.[0] ?? {};
+      if ("unitPrice" in line) fail ??= "raw unitPrice leaked to the API; it only accepts unitPriceMicros";
+      if (typeof line.unitPriceMicros !== "number") {
+        fail ??= `expected a numeric unitPriceMicros, got ${JSON.stringify(line.unitPriceMicros)}`;
+      }
+      if (parsed.action === "issue") {
+        if (!req.headers["idempotency-key"]) fail ??= "issue POST missing Idempotency-Key header";
+        if (line.unitPriceMicros !== 10_000_000) {
+          fail ??= `expected unitPriceMicros 10000000 for "10.00", got ${JSON.stringify(line.unitPriceMicros)}`;
+        }
+        return json(201, { id: "inv1", status: "issued", invoiceNumber: "FT 2026/1", atcud: "ABC-1" });
+      }
+      return json(201, { id: "inv2", status: "draft", invoiceNumber: null });
+    }
+    if (url.pathname === "/api/v1/products" && req.method === "POST") {
+      return json(201, { id: "prd1", name: bodyJson?.name ?? "p", unitPrice: bodyJson?.unitPrice });
     }
     if (url.pathname === "/api/v1/customers/nope") {
       return json(403, { error: { type: "insufficient_scope", message: "needs customers:read", details: ["customers:read"] } });
@@ -88,7 +106,7 @@ console.log("OK list_customers → query serialized, page returned");
 const issueArgs = {
   invoiceType: "invoice",
   action: "issue",
-  items: [{ description: "x", quantity: 1, unitPrice: 1000, vatRate: 23, itemType: "services" }],
+  items: [{ description: "x", quantity: 1, unitPrice: "10.00", vatRate: 23, itemType: "services" }],
 };
 
 // 3a) Unconfirmed — must be refused, and must not reach the API at all.
@@ -126,6 +144,37 @@ console.log("OK create_invoice action:issue confirmed → certified invoice, ide
 const replay = await client.callTool({ name: "create_invoice", arguments: { ...issueArgs, confirmationToken: token } });
 assert(replay.isError, `a spent confirmationToken must not issue again: ${textOf(replay)}`);
 console.log("OK spent token → refused, cannot mint twice");
+
+// 3e) Products take CENTS, not micros — the wrapper must not confuse the two.
+const prod = await client.callTool({
+  name: "create_product",
+  arguments: { name: "Consulting", unitPrice: "80.00", unit: "hour", vatTier: "normal", itemType: "services" },
+});
+assert(!prod.isError, `create_product: ${textOf(prod)}`);
+const prodPost = seen.find((s) => s.method === "POST" && s.path === "/api/v1/products");
+assert(prodPost?.bodyJson?.unitPrice === 8000, `expected 8000 cents for "80.00", got ${prodPost?.bodyJson?.unitPrice}`);
+console.log("OK create_product → euros converted to cents, not micros");
+
+// 3f) Sub-cent precision survives to micros — the case micro-euros exist for.
+const precise = await client.callTool({
+  name: "create_invoice",
+  arguments: { invoiceType: "invoice", items: [{ description: "fuel", quantity: 100, unitPrice: "1.789", vatRate: 23, itemType: "goods" }] },
+});
+assert(!precise.isError, `sub-cent create_invoice: ${textOf(precise)}`);
+const draftPost = seen.filter((s) => s.method === "POST" && s.path === "/api/v1/invoices").pop();
+assert(
+  draftPost?.bodyJson?.items?.[0]?.unitPriceMicros === 1_789_000,
+  `expected 1789000 micros for "1.789", got ${draftPost?.bodyJson?.items?.[0]?.unitPriceMicros}`,
+);
+console.log("OK create_invoice → sub-cent unit price survives as micro-euros");
+
+// 3g) A malformed amount is refused as a tool error, never sent.
+const bad = await client.callTool({
+  name: "create_invoice",
+  arguments: { invoiceType: "invoice", items: [{ description: "x", quantity: 1, unitPrice: "80 euros", vatRate: 23, itemType: "services" }] },
+});
+assert(bad.isError && /decimal amount in euros/.test(textOf(bad)), `bad amount: ${textOf(bad)}`);
+console.log("OK malformed amount → refused with a readable error");
 
 // 4) Error envelope — 403 surfaced verbatim as a tool error.
 const err = await client.callTool({ name: "get_customer", arguments: { id: "nope" } });
