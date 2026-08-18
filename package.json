@@ -38,8 +38,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "smoke": "npm run build && node smoke.mjs && node live-smoke.mjs && node base-url-smoke.mjs",
-    "eval": "npm run build && node golden-eval.mjs"
+    "smoke": "npm run build && node smoke.mjs && node live-smoke.mjs && node base-url-smoke.mjs && node conformance.mjs",
+    "eval": "npm run build && node golden-eval.mjs",
+    "conformance": "npm run build && node conformance.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

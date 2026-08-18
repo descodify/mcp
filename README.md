@@ -80,8 +80,15 @@ to point at a self-hosted or dev instance.
 
 ## Tools
 
-Field names, money-in-cents and VAT-in-percent match the API's OpenAPI document
+Field names and VAT-in-percent match the API's OpenAPI document
 (`GET /api/v1/openapi.json`).
+
+**Money is a decimal euro string** — `"80.00"`, `"1.789"` — on every tool that
+takes a price. Never cents, never micro-euros: the wrapper converts to whatever
+unit each endpoint wants (cents for products, micro-euros for invoice lines,
+because SAF-T needs 4-6 decimals once a line discount is apportioned). A model
+emitting `80000000` instead of `80` would mint a certified invoice off by four
+orders of magnitude, so the multiplication happens in code, once, under test.
 
 | Tool | Endpoint |
 |---|---|
@@ -137,12 +144,24 @@ bun run build     # tsc → dist/
 ### Tests
 
 ```sh
-npm run smoke     # offline: handshake, tool registration, HTTP wire contract
-npm run eval      # golden questions: does a real model pick the right tool?
+npm run smoke        # handshake, tool registration, wire contract, conformance
+npm run conformance  # just the contract check against the live openapi.json
+npm run eval         # golden questions: does a real model pick the right tool?
 ```
 
-`smoke` needs nothing external — it runs the built server against an unreachable
-host and a local mock of `/api/v1`, so it never touches live data.
+`smoke` runs the built server against an unreachable host and a local mock of
+`/api/v1`, so it never touches live data. Its last step, `conformance`, is the
+one part that needs the network: it fetches the **published** `openapi.json` and
+validates every request body the server actually sends against it — required
+fields present, no field the schema does not define. It skips loudly if the spec
+is unreachable.
+
+That check exists because mocks are not a contract. On 2026-08-12 the API
+renamed invoice line prices to `unitPriceMicros`; this package kept sending
+`unitPrice`, so every `create_invoice` against production failed — and both
+smoke tests stayed green, because they ran against mocks written from this
+package's own idea of the contract. They agreed with each other and with nothing
+real. Run `npm run conformance` after any API change.
 
 `eval` is the behavioural test: it boots the server against the same kind of
 mock, pulls the real shipped tool schemas over MCP, and asks Claude a set of
