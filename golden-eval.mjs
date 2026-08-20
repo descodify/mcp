@@ -161,7 +161,7 @@ const PRODUCT = { id: "prd_1", name: "Consulting", unitPrice: 8000, vatRate: 23 
 const INVOICE = {
   id: "inv_1", invoiceNumber: "FT 2026/1", status: "draft", customerId: "cus_1",
   issueDate: "2026-07-30", amountCents: 98400, paymentStatus: "unpaid",
-  items: [{ description: "Consulting", quantity: 10, unitPrice: 8000, vatRate: 23 }],
+  items: [{ description: "Consulting", quantity: 10, unitPriceMicros: 80_000_000, vatRate: 23 }],
 };
 
 // Ground truth. Which tool the model called is a proxy; what reached the API is

@@ -83,12 +83,11 @@ to point at a self-hosted or dev instance.
 Field names and VAT-in-percent match the API's OpenAPI document
 (`GET /api/v1/openapi.json`).
 
-**Money is a decimal euro string** — `"80.00"`, `"1.789"` — on every tool that
-takes a price. Never cents, never micro-euros: the wrapper converts to whatever
-unit each endpoint wants (cents for products, micro-euros for invoice lines,
-because SAF-T needs 4-6 decimals once a line discount is apportioned). A model
-emitting `80000000` instead of `80` would mint a certified invoice off by four
-orders of magnitude, so the multiplication happens in code, once, under test.
+**Money is `unitPriceEur`, a decimal euro string** — `"80.00"`, `"1.789"` — on
+every tool that takes a price, and it is passed to `/api/v1` verbatim. The API
+accepts that field directly and converts to its own stored unit (micro-euros for
+invoice lines, cents for products), so this wrapper does no money arithmetic and
+has none to get wrong.
 
 | Tool | Endpoint |
 |---|---|
