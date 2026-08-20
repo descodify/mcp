@@ -38,12 +38,14 @@ Conventions (per `openapi.json`, always the authority): VAT rates integer
 **Money differs by path, and getting it wrong is a four-orders-of-magnitude
 error on a legal document:**
 
-- Over the **MCP tools**, every price is a decimal euro **string** — `"80.00"`,
-  `"1.789"`. Never cents, never micro-euros; the server converts.
-- Calling **`/api/v1` directly**, invoice line prices are integer
-  **micro-euros** (`unitPriceMicros`, 1 EUR = 1000000) because SAF-T needs 4-6
-  decimals once a line discount is apportioned, while product prices are
-  integer **cents** (`unitPrice`). Check `openapi.json` rather than assuming.
+- Send `unitPriceEur`, a decimal euro **string** — `"80.00"`, `"1.789"`. This
+  works identically over the MCP tools and against `/api/v1` directly, so there
+  is nothing to convert on either path.
+- The API *returns* prices in its stored units: invoice lines as integer
+  **micro-euros** (`unitPriceMicros`, 1 EUR = 1000000, the precision SAF-T needs
+  once a line discount is apportioned), products as integer **cents**
+  (`unitPrice`). Read those; do not construct them. Check `openapi.json` rather
+  than assuming.
 
 ## Operations available
 
