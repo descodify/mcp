@@ -83,11 +83,18 @@ to point at a self-hosted or dev instance.
 Field names and VAT-in-percent match the API's OpenAPI document
 (`GET /api/v1/openapi.json`).
 
-**Money is `unitPriceEur`, a decimal euro string** — `"80.00"`, `"1.789"` — on
-every tool that takes a price, and it is passed to `/api/v1` verbatim. The API
-accepts that field directly and converts to its own stored unit (micro-euros for
-invoice lines, cents for products), so this wrapper does no money arithmetic and
-has none to get wrong.
+**Money is `unitPrice`, a decimal string** — `"80.00"`, `"1.789"` — on every
+tool that takes a price, and it is passed to `/api/v1` verbatim. The API accepts
+that field directly and converts to its own stored unit, so this wrapper does no
+money arithmetic and has none to get wrong.
+
+**The currency is the invoice's, not the euro.** `currencyCode` (default `EUR`)
+sets it once for the whole document: on a USD invoice `unitPrice: "80.00"` means
+80.00 USD, and the server derives the euro figures the document is signed and
+reported in, printing the euro equivalent and the exchange rate on the invoice
+as Portuguese law requires. The catalogue is priced in EUR — only a document
+carries a currency — and a product added to a foreign-currency invoice is
+converted at that document's rate.
 
 | Tool | Endpoint |
 |---|---|

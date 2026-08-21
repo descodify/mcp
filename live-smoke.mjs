@@ -43,21 +43,21 @@ const server = http.createServer((req, res) => {
     }
     if (url.pathname === "/api/v1/invoices" && req.method === "POST") {
       const parsed = bodyJson ?? {};
-      // /api/v1 accepts unitPriceEur directly, so the wrapper forwards it
+      // /api/v1 accepts unitPrice directly, so the wrapper forwards it
       // verbatim and does no money arithmetic. Asserted on the wire because a
       // silent reintroduction of conversion is exactly what would go unnoticed.
       const line = parsed.items?.[0] ?? {};
-      if ("unitPriceMicros" in line) fail ??= "wrapper converted to unitPriceMicros; it should pass unitPriceEur through";
-      if ("unitPrice" in line) fail ??= "wrapper sent unitPrice; the API field is unitPriceEur";
-      if (!/^\d+(\.\d+)?$/.test(String(line.unitPriceEur ?? ""))) {
+      if ("unitPriceMicros" in line) fail ??= "wrapper converted to unitPriceMicros; it should pass unitPrice through";
+      if ("unitPriceEur" in line) fail ??= "wrapper sent the retired unitPriceEur; the API field is unitPrice";
+      if (!/^\d+(\.\d+)?$/.test(String(line.unitPrice ?? ""))) {
         return json(422, {
-          error: { type: "validation_error", message: "items[0].unitPriceEur must be a decimal amount in euros" },
+          error: { type: "validation_error", message: "items[0].unitPrice must be a decimal amount in the document currency" },
         });
       }
       if (parsed.action === "issue") {
         if (!req.headers["idempotency-key"]) fail ??= "issue POST missing Idempotency-Key header";
-        if (line.unitPriceEur !== "10.00") {
-          fail ??= `expected unitPriceEur "10.00" verbatim, got ${JSON.stringify(line.unitPriceEur)}`;
+        if (line.unitPrice !== "10.00") {
+          fail ??= `expected unitPrice "10.00" verbatim, got ${JSON.stringify(line.unitPrice)}`;
         }
         return json(201, { id: "inv1", status: "issued", invoiceNumber: "FT 2026/1", atcud: "ABC-1" });
       }
@@ -109,7 +109,7 @@ console.log("OK list_customers → query serialized, page returned");
 const issueArgs = {
   invoiceType: "invoice",
   action: "issue",
-  items: [{ description: "x", quantity: 1, unitPriceEur: "10.00", vatRate: 23, itemType: "services" }],
+  items: [{ description: "x", quantity: 1, unitPrice: "10.00", vatRate: 23, itemType: "services" }],
 };
 
 // 3a) Unconfirmed — must be refused, and must not reach the API at all.
@@ -148,28 +148,29 @@ const replay = await client.callTool({ name: "create_invoice", arguments: { ...i
 assert(replay.isError, `a spent confirmationToken must not issue again: ${textOf(replay)}`);
 console.log("OK spent token → refused, cannot mint twice");
 
-// 3e) Products pass unitPriceEur through as well — no per-endpoint unit knowledge.
+// 3e) Products pass unitPrice through as well — no per-endpoint unit knowledge.
 const prod = await client.callTool({
   name: "create_product",
-  arguments: { name: "Consulting", unitPriceEur: "80.00", unit: "hour", vatTier: "normal", itemType: "services" },
+  arguments: { name: "Consulting", unitPrice: "80.00", unit: "hour", vatTier: "normal", itemType: "services" },
 });
 assert(!prod.isError, `create_product: ${textOf(prod)}`);
 const prodPost = seen.find((s) => s.method === "POST" && s.path === "/api/v1/products");
-assert(prodPost?.bodyJson?.unitPriceEur === "80.00", `expected unitPriceEur "80.00", got ${JSON.stringify(prodPost?.bodyJson?.unitPriceEur)}`);
-assert(!("unitPrice" in (prodPost?.bodyJson ?? {})), "wrapper converted the product price; it should pass through");
-console.log("OK create_product → unitPriceEur forwarded verbatim");
+assert(prodPost?.bodyJson?.unitPrice === "80.00", `expected unitPrice "80.00", got ${JSON.stringify(prodPost?.bodyJson?.unitPrice)}`);
+assert(!("unitPriceEur" in (prodPost?.bodyJson ?? {})), "wrapper sent the retired unitPriceEur");
+assert(!("unitPriceMicros" in (prodPost?.bodyJson ?? {})), "wrapper converted the product price to micros; it should pass through");
+console.log("OK create_product → unitPrice forwarded verbatim");
 
 // 3f) Sub-cent precision reaches the API unchanged — the case micro-euros exist
 //     for, now carried as a decimal string rather than converted here.
 const precise = await client.callTool({
   name: "create_invoice",
-  arguments: { invoiceType: "invoice", items: [{ description: "fuel", quantity: 100, unitPriceEur: "1.789", vatRate: 23, itemType: "goods" }] },
+  arguments: { invoiceType: "invoice", items: [{ description: "fuel", quantity: 100, unitPrice: "1.789", vatRate: 23, itemType: "goods" }] },
 });
 assert(!precise.isError, `sub-cent create_invoice: ${textOf(precise)}`);
 const draftPost = seen.filter((s) => s.method === "POST" && s.path === "/api/v1/invoices").pop();
 assert(
-  draftPost?.bodyJson?.items?.[0]?.unitPriceEur === "1.789",
-  `expected unitPriceEur "1.789" verbatim, got ${JSON.stringify(draftPost?.bodyJson?.items?.[0]?.unitPriceEur)}`,
+  draftPost?.bodyJson?.items?.[0]?.unitPrice === "1.789",
+  `expected unitPrice "1.789" verbatim, got ${JSON.stringify(draftPost?.bodyJson?.items?.[0]?.unitPrice)}`,
 );
 console.log("OK create_invoice → sub-cent unit price forwarded verbatim");
 
@@ -178,7 +179,7 @@ console.log("OK create_invoice → sub-cent unit price forwarded verbatim");
 //     here — one authority for the contract, which is the point of pass-through.
 const bad = await client.callTool({
   name: "create_invoice",
-  arguments: { invoiceType: "invoice", items: [{ description: "x", quantity: 1, unitPriceEur: "80 euros", vatRate: 23, itemType: "services" }] },
+  arguments: { invoiceType: "invoice", items: [{ description: "x", quantity: 1, unitPrice: "80 euros", vatRate: 23, itemType: "services" }] },
 });
 assert(bad.isError && /validation_error/.test(textOf(bad)), `bad amount should surface the API error: ${textOf(bad)}`);
 console.log("OK malformed amount → API's validation error surfaced verbatim");

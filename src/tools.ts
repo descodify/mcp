@@ -2,7 +2,8 @@
  * Registers the Descodify MCP tool surface. Every tool is a thin wrapper over
  * an `/api/v1` endpoint (see ../README.md for the mapping). Field names are the
  * camelCase the API actually ships (per its OpenAPI 3.1 document) and VAT rates
- * are integer percent. Money is `unitPriceEur`, a decimal euro string ("80.00"),
+ * are integer percent. Money is `unitPrice`, a decimal string ("80.00") in the
+ * INVOICE'S currency (`currencyCode`, default EUR),
  * passed through verbatim: /api/v1 accepts it directly and does the conversion
  * to its stored unit, so this wrapper has no money arithmetic to get wrong.
  *
@@ -46,10 +47,10 @@ const customerFields = {
 const productFields = {
   name: z.string(),
   description: z.string().nullish(),
-  unitPriceEur: z
+  unitPrice: z
     .string()
     .describe(
-      'Unit price net of tax, in EUROS, as a decimal string — "80.00", "1.789". The API takes this field verbatim.',
+      'Unit price net of tax, as a decimal string — "80.00", "1.789". The catalogue is priced in EUR; only an invoice carries a currency, and a product added to a foreign-currency invoice is converted at that document\'s rate. The API takes this field verbatim.',
     ),
   unit: z.string().describe('e.g. "unit", "hour", "kg".'),
   vatTier: z.enum(["normal", "intermediate", "reduced", "exempt"]),
@@ -60,10 +61,10 @@ const invoiceItem = z.object({
   productId: z.string().nullish().describe("Optional — reference an existing product."),
   description: z.string(),
   quantity: z.number().int().min(1),
-  unitPriceEur: z
+  unitPrice: z
     .string()
     .describe(
-      'Unit price net of tax, in EUROS, as a decimal string — "80.00", "1.789". The API takes this field verbatim.',
+      'Unit price net of tax, as a decimal string — "80.00", "1.789". IN THE INVOICE\'S CURRENCY, which currencyCode sets once for the whole document and which defaults to EUR: on a USD invoice "80.00" means 80.00 USD, and the server derives the euro figures the document is signed and reported in. The API takes this field verbatim.',
     ),
   vatRate: z.number().int().min(0).describe("VAT rate as a percent (23 = 23%)."),
   vatExemptionCode: z.string().nullish().describe("Required when vatRate is 0."),
@@ -82,6 +83,19 @@ const invoiceFields = {
   reason: z.string().nullish(),
   notes: z.string().nullish(),
   withholdingRate: z.number().int().nullish().describe("Basis points (2300 = 23%)."),
+  currencyCode: z
+    .string()
+    .length(3)
+    .optional()
+    .describe(
+      'ISO 4217 currency the invoice is AGREED in — defaults to EUR. This is the one field that says what every price on the request means: on a USD invoice the line prices are USD, and the server derives the EUR the document is signed and reported in, printing the euro equivalent and the rate on the document as Portuguese law requires. Must be a currency the ECB publishes a daily reference rate for.',
+    ),
+  exchangeRate: z
+    .string()
+    .nullish()
+    .describe(
+      "Only for a contractually fixed rate: EUR per one unit of currencyCode, as a decimal string. Omit it and the server resolves the ECB rate for the invoice's date, which is what you almost always want.",
+    ),
   items: z.array(invoiceItem).min(1),
 };
 
@@ -136,14 +150,28 @@ function invoiceBody(args: Record<string, unknown>) {
 const ISSUE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const pendingIssue = new Map<string, { token: string; expiresAt: number }>();
 
-function formatCents(v: unknown): string {
-  return typeof v === "number" ? `${(v / 100).toFixed(2)} EUR` : "unknown";
+/**
+ * The currency a document is denominated in. Defaults to EUR, which is what an
+ * invoice with no `currencyCode` is.
+ *
+ * Every amount in the confirmation summary passes through this. Printing "EUR"
+ * beside a USD figure would be a unit lie in the one piece of text a human
+ * approves before an irreversible mint — the same class of mistake the API
+ * removed when it stopped calling the input field `unitPriceEur`.
+ */
+function documentCurrency(inv: Record<string, unknown>): string {
+  const code = inv.currencyCode;
+  return typeof code === "string" && code.trim() ? code.trim().toUpperCase() : "EUR";
+}
+
+function formatCents(v: unknown, currency = "EUR"): string {
+  return typeof v === "number" ? `${(v / 100).toFixed(2)} ${currency}` : "unknown";
 }
 
 /**
  * A line's unit price, from either shape the summary can be built from: a
  * fetched invoice carries `unitPriceMicros` (the stored unit), while a
- * create-and-issue request carries the `unitPriceEur` string the caller sent.
+ * create-and-issue request carries the `unitPrice` string the caller sent.
  * Both must render, because this text is what a human approves before an
  * irreversible mint — showing "unknown" there would be worse than not asking.
  *
@@ -151,28 +179,40 @@ function formatCents(v: unknown): string {
  * "80.000000", while a discount-apportioned one keeps its real precision
  * ("0.5016"): the human must see what is actually on the document.
  */
-function formatUnitPrice(item: Record<string, unknown>): string {
-  const micros = item.unitPriceMicros;
+function formatUnitPrice(item: Record<string, unknown>, currency = "EUR"): string {
+  // A fetched invoice carries the FOREIGN micros when it has them: that is the
+  // price the parties agreed, and it is what the human is being asked about.
+  // `unitPriceMicros` beside it is the derived EUR, which would read as the
+  // wrong number under a USD heading.
+  const micros =
+    typeof item.unitPriceForeignMicros === "number"
+      ? item.unitPriceForeignMicros
+      : item.unitPriceMicros;
   if (typeof micros === "number") {
-    return `${(micros / 1_000_000).toFixed(6).replace(/(\.\d\d)(\d*?)0+$/, "$1$2")} EUR`;
+    return `${(micros / 1_000_000).toFixed(6).replace(/(\.\d\d)(\d*?)0+$/, "$1$2")} ${currency}`;
   }
-  const eur = item.unitPriceEur;
-  if (typeof eur === "string" && eur.trim()) return `${eur.trim()} EUR`;
+  const typed = item.unitPrice;
+  if (typeof typed === "string" && typed.trim()) return `${typed.trim()} ${currency}`;
   return "unknown";
 }
 
 /** The facts a human must check before an irreversible mint. */
 function summariseInvoice(inv: Record<string, unknown>): string {
+  const currency = documentCurrency(inv);
   const items = Array.isArray(inv.items) ? inv.items : [];
   const lines = items.map((raw) => {
     const it = raw as Record<string, unknown>;
-    return `    - ${String(it.description ?? "item")} x ${String(it.quantity ?? "?")} @ ${formatUnitPrice(it)}`;
+    return `    - ${String(it.description ?? "item")} x ${String(it.quantity ?? "?")} @ ${formatUnitPrice(it, currency)}`;
   });
   return [
     `  Invoice:  ${String(inv.invoiceNumber ?? inv.id ?? "(not yet created)")}`,
     `  Type:     ${String(inv.invoiceType ?? "invoice")}`,
     `  Customer: ${String(inv.customerId ?? "-")}`,
-    `  Total:    ${formatCents(inv.amountCents)}`,
+    `  Total:    ${
+      currency === "EUR"
+        ? formatCents(inv.amountCents)
+        : `${formatCents(inv.currencyAmountCents, currency)} (${formatCents(inv.amountCents)})`
+    }`,
     lines.length ? `  Lines:\n${lines.join("\n")}` : "",
   ]
     .filter(Boolean)

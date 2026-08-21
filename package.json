@@ -1,7 +1,7 @@
 {
   "name": "@descodify/mcp",
-  "version": "0.1.3",
-  "description": "Model Context Protocol server for Descodify — drive certified Portuguese invoicing, customers and products from your AI (Claude Desktop, Claude Code, Cursor, …).",
+  "version": "0.1.4",
+  "description": "Model Context Protocol server for Descodify \u2014 drive certified Portuguese invoicing, customers and products from your AI (Claude Desktop, Claude Code, Cursor, \u2026).",
   "license": "MIT",
   "homepage": "https://descodify.pt/developers",
   "repository": {
