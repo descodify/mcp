@@ -93,9 +93,13 @@ await client.connect(transport);
 const CALLS = [
   ["create_customer", { customerType: "business", name: "Acme Lda", country: "PT", vatNumber: "500000000" }],
   ["update_customer", { id: "cus_1", customerType: "business", name: "Acme Lda", country: "PT" }],
-  ["create_product", { name: "Consulting", unitPriceEur: "80.00", unit: "hour", vatTier: "normal", itemType: "services" }],
-  ["update_product", { id: "prd_1", name: "Consulting", unitPriceEur: "80.00", unit: "hour", vatTier: "normal", itemType: "services" }],
-  ["create_invoice", { invoiceType: "invoice", customerId: "cus_1", items: [{ description: "Consulting", quantity: 10, unitPriceEur: "80.00", vatRate: 23, itemType: "services" }] }],
+  ["create_product", { name: "Consulting", unitPrice: "80.00", unit: "hour", vatTier: "normal", itemType: "services" }],
+  ["update_product", { id: "prd_1", name: "Consulting", unitPrice: "80.00", unit: "hour", vatTier: "normal", itemType: "services" }],
+  ["create_invoice", { invoiceType: "invoice", customerId: "cus_1", items: [{ description: "Consulting", quantity: 10, unitPrice: "80.00", vatRate: 23, itemType: "services" }] }],
+  // A foreign-currency document. `unitPrice` means USD here, and currencyCode is
+  // the only thing that says so — the field the surface could not reach before
+  // 0.1.4, and the reason an untested one is how the last rename slipped through.
+  ["create_invoice", { invoiceType: "invoice", customerId: "cus_1", currencyCode: "USD", items: [{ description: "Consulting", quantity: 10, unitPrice: "80.00", vatRate: 23, itemType: "services" }] }],
 ];
 
 for (const [name, args] of CALLS) {
